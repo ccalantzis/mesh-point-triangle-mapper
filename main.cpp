@@ -1,16 +1,32 @@
 #include "mapper.h"
 
+void point_provided(mapper &m)
+{
+    Eigen::RowVector3d point = {0,0,0};
+    int triangle = m.point_to_triangle(point);
+    if(triangle == -1) return;
+    m.display_point_and_triangle(triangle, point);
+}
+
+void random_point_generated(mapper &m)
+{
+    int triangle;
+    Eigen::RowVector3d point;
+    bool passed = m.test_point_to_triangle(triangle, point);
+    if(triangle == -1) return;
+    m.display_point_and_triangle(triangle, point);
+}
+
 int main(int argc, char *argv[])
 {
-    srand (static_cast <unsigned> (time(0)));
-    std::cout << std::boolalpha;;
-//    mapper m = mapper("inspired_mesh.obj");
-    mapper m = mapper("head.ply");
+    if(argc < 2)
+    {
+        std::cout << "required command line argument: path to mesh file\n";
+        return -1;
+    }
 
-    int test_triangle = 0;
-    Eigen::RowVector3d test_point;
-    bool passed = m.test_point_to_triangle(test_triangle, test_point);
-    std::cout << "test passed: " << passed << "\n\n";
+    std::string mesh_filename = argv[1];    
+    mapper m = mapper(mesh_filename);
 
-    m.display_point_and_triangle(test_triangle, test_point);
+    random_point_generated(m);
 }

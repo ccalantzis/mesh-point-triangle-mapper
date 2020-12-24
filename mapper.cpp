@@ -19,15 +19,30 @@ mapper::mapper(std::string filename)
     voxel_cubes = get_voxel_cubes(GV);
     vg_min = voxel_cubes.colwise().minCoeff();
     vg_max = voxel_cubes.colwise().maxCoeff();
+    map = voxel_to_triangle_mapping();
 }
 
-//checking that the specified point is inside the voxel grid
+Eigen::MatrixXd mapper::get_voxel_cubes(const Eigen::MatrixXd &cube_centres)
+{
+    Eigen::MatrixXd cube_V(cube_centres.rows()*2,3);
+    double chsl = csl/2;
+    for (int i = 0; i < cube_centres.rows(); ++i)
+    {
+        auto tcv = cube_centres.row(i); //centre of cube
+        cube_V.row(2*i) << tcv(0) - chsl, tcv(1) - chsl, tcv(2) - chsl;
+        cube_V.row(2*i + 1) << tcv(0) + chsl, tcv(1) + chsl, tcv(2) + chsl;
+    }
+    return cube_V;
+}
+
+// checking that the specified point is inside the bounding box of the object
 bool mapper::is_point_within_range(const Eigen::RowVector3d &point)
 {
     for(int i = 0; i <3; ++i)
     {
         if(point(i) < vg_min(i) || point(i) > vg_max(i))
         {
+            std::cout << point_to_string(point) << " not contained in bounding box of object\n";
             return false;
         }
     }
@@ -44,29 +59,14 @@ int mapper::point_to_voxel(const Eigen::RowVector3d &point)
     return voxel;
 }
 
-//returns a matrix of pairs containing the min and max vertices of each cube in the voxel grid
-Eigen::MatrixXd mapper::get_voxel_cubes(const Eigen::MatrixXd &cube_centres)
-{
-    Eigen::MatrixXd cube_V(cube_centres.rows()*2,3);
-    double chsl = csl/2;
-    for (int i = 0; i < cube_centres.rows(); ++i)
-    {
-        auto tcv = cube_centres.row(i); //centre of cube
-        cube_V.row(2*i) << tcv(0) - chsl, tcv(1) - chsl, tcv(2) - chsl;
-        cube_V.row(2*i + 1) << tcv(0) + chsl, tcv(1) + chsl, tcv(2) + chsl;
-    }
-    return cube_V;
-}
-
-//this method takes a triangle and returns the voxels that the triangle is present in
+// this method takes a triangle and returns the voxels that the triangle is present in
 std::vector<int> mapper::triangle_to_voxels(const Eigen::Matrix<double,3,3> &triangle)
 {
     std::vector<int> cubes;
-    //min and max coordinates of the triangle
+    // min and max coordinates of the triangle
     Eigen::RowVector3d min = triangle.colwise().minCoeff();
     Eigen::RowVector3d max = triangle.colwise().maxCoeff();
-    Eigen::RowVector3d max_xy_min_z;
-    max_xy_min_z << max(0), max(1), min(2);
+    Eigen::RowVector3d max_xy_min_z = {max(0), max(1), min(2)};
     int min_voxel = point_to_voxel(min);
     int max_voxel = point_to_voxel(max);
     int max_xy_min_z_voxel = point_to_voxel(max_xy_min_z);
@@ -98,7 +98,7 @@ std::vector<int> mapper::triangle_to_voxels(const Eigen::Matrix<double,3,3> &tri
     return cubes;
 }
 
-//A vector of vectors where each vector represents a voxel and the values inside represent the triangles inside that voxel
+// each vector represents a voxel and the triangles in that voxel
 std::vector<std::vector<int>> mapper::voxel_to_triangle_mapping()
 {
     std::vector<std::vector<int>> mapping;
@@ -121,14 +121,14 @@ std::vector<std::vector<int>> mapper::voxel_to_triangle_mapping()
     return mapping;
 }
 
-//find the triangle that 'point' lies on, given the triangles in a voxel
-int mapper::point_to_triangle(const Eigen::RowVector3d &point, const std::vector<std::vector<int>> &mapping)
+// find the triangle that 'point' lies on, given the triangles in a voxel
+int mapper::point_to_triangle(const Eigen::RowVector3d &point)
 {
     Eigen::MatrixXd point_d;
     point_d = point;
     int voxel = point_to_voxel(point);
     if(voxel == -1) return -1;
-    std::vector<int> triangles = mapping[voxel];
+    std::vector<int> triangles = map[voxel];
     for(int i = 0; i < triangles.size(); ++i)
     {
         int F_index = triangles[i];
@@ -148,39 +148,38 @@ int mapper::point_to_triangle(const Eigen::RowVector3d &point, const std::vector
             }
         }
     }
-
+    std::cout << point_to_string(point) << " does not lie on a face of the mesh\n";
     return -1;
 }
 
 double mapper::randMToN(double M, double N)
 {
+    srand (static_cast <unsigned> (time(0)));
     return M + (rand() / ( RAND_MAX / (N-M) ) ) ;
 }
 
+std::string mapper::point_to_string(Eigen::Vector3d point)
+{
+    return std::to_string(point(0)) + ", " + std::to_string(point(1)) + ", " + std::to_string(point(2));
+}
+
 // choose a random triangle, and then a random point on that triangle
-// check the find triangle_in_
+// write into test_triangle the value returned by point_to_triangle
+// return true if test_triangle matches the randomly chosen triangle
+// test_triangle and test_point can also be used to visually check the result
 bool mapper::test_point_to_triangle(int &test_triangle, Eigen::RowVector3d &test_point)
 {
-    std::vector<std::vector<int>> map = voxel_to_triangle_mapping();
-
     double u = randMToN(0.1, 0.8);
     double v = randMToN(0.1, 0.9-u);
     double w = 1-u-v;
     int F_index = rand()%(F.rows()+1);
-    Eigen::RowVector3d example_point;
-    example_point << u*V.row(F.row(F_index)(0)) + v*V.row(F.row(F_index)(1)) + w*V.row(F.row(F_index)(2));
+    test_point << u*V.row(F.row(F_index)(0)) + v*V.row(F.row(F_index)(1)) + w*V.row(F.row(F_index)(2));
     test_triangle = F_index;
-    test_point = example_point;
-    auto start = std::chrono::high_resolution_clock::now();
-    int triangle = point_to_triangle(example_point, map);
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-    std::cout << "time taken to find triangle: " << duration.count() << " microseconds" << '\n';
+    int triangle = point_to_triangle(test_point);
     return triangle == F_index;
 }
 
-// we have a colours matrix with the same number of rows as faces
-// every face is set to white except the test_triangle, which is red
+// set every face colour to white except the test_triangle, which is green
 void mapper::set_vertex_colours(Eigen::MatrixXd &colours, const int &test_triangle)
 {
     colours = Eigen::MatrixXd(colours.rows(),3);
@@ -198,6 +197,8 @@ void mapper::set_vertex_colours(Eigen::MatrixXd &colours, const int &test_triang
     }
 }
 
+// this displays the mesh with every triangle coloured white, except test_triangle
+// test_point is displayed as a red circle
 void mapper::display_point_and_triangle(int test_triangle, Eigen::RowVector3d test_point)
 {
     Eigen::MatrixXd colours = Eigen::MatrixXd(F.rows(),3);
@@ -206,6 +207,12 @@ void mapper::display_point_and_triangle(int test_triangle, Eigen::RowVector3d te
     igl::opengl::glfw::Viewer viewer;
     viewer.data().set_mesh(V, F);
     viewer.data().set_colors(colours);
+
+//    Eigen::RowVector3d v1 = V.row(F(test_triangle,1)) - V.row(F(test_triangle,0));
+//    Eigen::RowVector3d v2 = V.row(F(test_triangle,2)) - V.row(F(test_triangle,0));
+//    double triangle_area = v1.cross(v2).norm();
+//    viewer.data().point_size = triangle_area*3;
+
     viewer.data().point_size = 10;
     viewer.data().add_points(test_point, Eigen::RowVector3d(1,0,0));
     viewer.data().set_face_based(true);
